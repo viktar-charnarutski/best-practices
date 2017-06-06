@@ -37,10 +37,24 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class SimpleCircuitBreaker {
 
+    /**
+     * Holds the specified threshold of failed calls.
+     */
     private final int failureAttemptsThreshold;
+
+    /**
+     * Holds the specified outage's timeout.
+     */
     private final long outageTimeout;
 
+    /**
+     * Holds the current <em>circuit breaker</em>'s state.
+     */
     private final AtomicReference<OutageState> state = new AtomicReference<>(OutageState.CLOSED);
+
+    /**
+     * Hold's the current outage's information.
+     */
     private final AtomicReference<Failure> currentOutage = new AtomicReference<>(new Failure(0, 0));
 
     /**
@@ -175,7 +189,14 @@ public class SimpleCircuitBreaker {
      * Internal class for the current outage's information holding.
      */
     private static class Failure {
+        /**
+         * Holds a current failure attempts number.
+         */
         private final int failureAttempts;
+
+        /**
+         * Holds a time in milliseconds when the <em>circuit breaker</em> was switched to <em>open</em> state
+         */
         private final long startTime;
 
         /**
