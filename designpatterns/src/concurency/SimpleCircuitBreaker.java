@@ -124,8 +124,6 @@ public class SimpleCircuitBreaker {
      * state and the defined <em>failed calls threshold</em> is reached.
      * <p>
      * If the current monitored time frame is expired, the failure information will be reset.
-     * <p>
-     * The method is marked as {@code synchronized} to prevent simultaneous outage opening attempts.
      */
     public void requestOutage() {
         // check if the previous failure attempts were captured long time ago

@@ -11,7 +11,7 @@ import java.util.concurrent.CyclicBarrier;
  * A simple client created for {@code SimpleCircuitBreaker} testing purpose.
  */
 public class CircuitBreakerTester {
-    private SimpleCircuitBreaker watcher = new SimpleCircuitBreaker(5, 10000L);
+    private SimpleCircuitBreaker watcher = new SimpleCircuitBreaker(5, 10000L, 5000L);
 
     private void externalCall() {
         if (!watcher.isOutageInProgress()) {
