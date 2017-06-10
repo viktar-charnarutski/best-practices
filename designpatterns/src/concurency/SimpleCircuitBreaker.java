@@ -40,7 +40,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * @author Viktar Charnarutski
  */
-public class SimpleCircuitBreaker {
+public class SimpleCircuitBreaker implements Outage {
 
     /**
      * Holds the specified threshold of failed calls.
@@ -60,12 +60,12 @@ public class SimpleCircuitBreaker {
     /**
      * Holds the current <em>circuit breaker</em>'s state.
      */
-    private final AtomicReference<OutageState> state = new AtomicReference<>(OutageState.CLOSED);
+    private final AtomicReference<State> state = new AtomicReference<>(State.CLOSED);
 
     /**
      * Hold's the current outage's information.
      */
-    private final AtomicReference<Failure> currentOutage = new AtomicReference<>(new Failure());
+    private final AtomicReference<Failure> currentFailure = new AtomicReference<>(new Failure());
 
     /**
      * Creates a new instance on the {@code SimpleCircuitBreaker} and initialize threshold, timeout and
@@ -83,40 +83,20 @@ public class SimpleCircuitBreaker {
     }
 
     /**
-     * Returns a specified amount of failed calls which automatically switches the <em>circuit breaker</em>
-     * to <em>open</em> state.
-     *
-     * @return failed calls threshold
-     */
-    public int failureAttemptsThreshold() {
-        return failureAttemptsThreshold;
-    }
-
-    /**
-     * Returns a specified timeout which define a longevity of outage. When the specified <em>timeout</em> is
-     * passed, the <em>circuit breaker</em> switches back to <em>closed</em> state.
-     *
-     * @return outage timeout
-     */
-    public long outageTimeout() {
-        return outageTimeout;
-    }
-
-    /**
-     * Checks if the <em>circuit breaker</em> is in <em>open</em> state.
+     * Checks if the <em>outage</em> is in progress.
      * <p>
-     * If the <em>circuit breaker</em> is in <em>open</em> state and the specified outage timeout is already passed,
-     * it requests switching back to <em>closed</em> state.
+     * If the <em>outage</em> is in progress and the specified outage timeout is already passed,
+     * it will finish the current outage.
      *
-     * @return {@code true} if the <em>circuit breaker</em> is in <em>open</em> state, {@code false} if not.
+     * @return {@code true} if the <em>outage</em> is <em>in progress</em> state, {@code false} if not.
      */
     public boolean isOutageInProgress() {
         // check if the outage is in progress but could be closed
         // due to it's allowed longevity is expired
-        if (isOutageOpened() && isOutageTimeoutExpired()) {
+        if (isCircuitBreakerOpen() && isOpenStateTimeoutExpired()) {
             closeOutage();
         }
-        return isOutageOpened();
+        return isCircuitBreakerOpen();
     }
 
     /**
@@ -129,15 +109,15 @@ public class SimpleCircuitBreaker {
         // check if the previous failure attempts were captured long time ago
         // and not actual any more
         if (isMonitoredTimeFrameExpired()) {
-            Failure currentFailure = currentOutage.get();
+            Failure currentFailure = this.currentFailure.get();
             Failure newFailure = new Failure(1, System.currentTimeMillis(), 0L);
-            currentOutage.compareAndSet(currentFailure, newFailure);
+            this.currentFailure.compareAndSet(currentFailure, newFailure);
         } else {
             // increment failure attempts and then check
             // if it's already reached to a critical value
-            Failure currentFailure = currentOutage.get();
-            Failure newFailure = currentOutage.get().increment();
-            currentOutage.compareAndSet(currentFailure, newFailure);
+            Failure currentFailure = this.currentFailure.get();
+            Failure newFailure = this.currentFailure.get().increment();
+            this.currentFailure.compareAndSet(currentFailure, newFailure);
             if (isThresholdReached()) {
                 openOutage();
             }
@@ -150,13 +130,13 @@ public class SimpleCircuitBreaker {
      * <p>
      * The operation is allowed only if the current state is <em>closed</em>, otherwise the call is ignored.
      */
-    private void openOutage() {
-        if (isOutageClosed()) {
-            state.compareAndSet(OutageState.CLOSED, OutageState.OPEN);
-            Failure currentFailure = currentOutage.get();
+    public void openOutage() {
+        if (isCircuitBreakerClosed()) {
+            state.compareAndSet(State.CLOSED, State.OPEN);
+            Failure currentFailure = this.currentFailure.get();
             Failure newFailure = new Failure(currentFailure.failureAttempts(), currentFailure.monitoringStartTime(),
                     System.currentTimeMillis());
-            currentOutage.compareAndSet(currentFailure, newFailure);
+            this.currentFailure.compareAndSet(currentFailure, newFailure);
         }
     }
 
@@ -166,22 +146,25 @@ public class SimpleCircuitBreaker {
      * <p>
      * The operation is allowed only if the current state is <em>open</em>, otherwise the call is ignored.
      */
-    private void closeOutage() {
-        if (isOutageOpened()) {
-            state.compareAndSet(OutageState.OPEN, OutageState.CLOSED);
-            Failure currentFailure = currentOutage.get();
+    public void closeOutage() {
+        if (isCircuitBreakerOpen()) {
+            state.compareAndSet(State.OPEN, State.CLOSED);
+            Failure currentFailure = this.currentFailure.get();
             Failure newFailure = new Failure();
-            currentOutage.compareAndSet(currentFailure, newFailure);
+            this.currentFailure.compareAndSet(currentFailure, newFailure);
         }
     }
 
     /**
-     * Checks whether the <em>circuit breaker</em> is in <em>open</em> state.
+     * Checks if the <em>circuit breaker</em> is in <em>open</em> state.
+     * <p>
+     * If the <em>circuit breaker</em> is in <em>open</em> state and the specified outage timeout is already passed,
+     * it requests switching back to <em>closed</em> state.
      *
      * @return {@code true} if the <em>circuit breaker</em> is in <em>open</em> state, {@code false} if not.
      */
-    private boolean isOutageOpened() {
-        return state.get() == OutageState.OPEN;
+    private boolean isCircuitBreakerOpen() {
+        return state.get() == State.OPEN;
     }
 
     /**
@@ -189,8 +172,8 @@ public class SimpleCircuitBreaker {
      *
      * @return {@code true} if the <em>circuit breaker</em> is in <em>closed</em> state, {@code false} if not.
      */
-    private boolean isOutageClosed() {
-        return state.get() == OutageState.CLOSED;
+    private boolean isCircuitBreakerClosed() {
+        return state.get() == State.CLOSED;
     }
 
     /**
@@ -199,7 +182,7 @@ public class SimpleCircuitBreaker {
      * @return {@code true} if the current failure attempts number reached the defined threshold, {@code false} if not.
      */
     private boolean isThresholdReached() {
-        return currentOutage.get().failureAttempts() >= failureAttemptsThreshold;
+        return currentFailure.get().failureAttempts() >= failureAttemptsThreshold;
     }
 
     /**
@@ -207,8 +190,8 @@ public class SimpleCircuitBreaker {
      *
      * @return {@code true} if the current outage's timeout is expired, {@code false} if not.
      */
-    private boolean isOutageTimeoutExpired() {
-        return System.currentTimeMillis() - currentOutage.get().outageStartTime() > outageTimeout;
+    private boolean isOpenStateTimeoutExpired() {
+        return System.currentTimeMillis() - currentFailure.get().outageStartTime() > outageTimeout;
     }
 
     /**
@@ -217,7 +200,7 @@ public class SimpleCircuitBreaker {
      * @return {@code true} if the current monitored time frame is expired, {@code false} if not.
      */
     private boolean isMonitoredTimeFrameExpired() {
-        return System.currentTimeMillis() - currentOutage.get().monitoringStartTime() > monitoredTimeFrame;
+        return System.currentTimeMillis() - currentFailure.get().monitoringStartTime() > monitoredTimeFrame;
     }
 
     /**
@@ -243,7 +226,7 @@ public class SimpleCircuitBreaker {
          * Creates an immutable instance of {@code Failure} initializing it with zero failure attempts, current time
          * and zero outage start time.
          */
-        public Failure() {
+        Failure() {
             this(0, System.currentTimeMillis(), 0L);
         }
 
@@ -256,7 +239,7 @@ public class SimpleCircuitBreaker {
          * @param outageStartTime     time in milliseconds when the <em>circuit breaker</em> was switched to
          *                            <em>open</em> state
          */
-        public Failure(int failureAttempts, long monitoringStartTime, long outageStartTime) {
+        Failure(int failureAttempts, long monitoringStartTime, long outageStartTime) {
             this.failureAttempts = failureAttempts;
             this.monitoringStartTime = monitoringStartTime;
             this.outageStartTime = outageStartTime;
@@ -267,7 +250,7 @@ public class SimpleCircuitBreaker {
          *
          * @return current number of failure attempts
          */
-        public int failureAttempts() {
+        int failureAttempts() {
             return failureAttempts;
         }
 
@@ -276,7 +259,7 @@ public class SimpleCircuitBreaker {
          *
          * @return time in milliseconds since the monitoring is active
          */
-        public long monitoringStartTime() {
+        long monitoringStartTime() {
             return monitoringStartTime;
         }
 
@@ -285,7 +268,7 @@ public class SimpleCircuitBreaker {
          *
          * @return time in milliseconds when the <em>circuit breaker</em> was switched to <em>open</em> state
          */
-        public long outageStartTime() {
+        long outageStartTime() {
             return outageStartTime;
         }
 
@@ -297,7 +280,7 @@ public class SimpleCircuitBreaker {
          * @return new {@code Failure} object initialized with incremented number of failure attempts, the time since
          * the monitoring is active and the start time of outage
          */
-        public Failure increment() {
+        Failure increment() {
             return new Failure(failureAttempts + 1, monitoringStartTime, outageStartTime);
         }
     }
@@ -305,7 +288,7 @@ public class SimpleCircuitBreaker {
     /**
      * Internal enum for <em>circuit breaker</em>'s states representation.
      */
-    private enum OutageState {
+    private enum State {
         OPEN, CLOSED
     }
 }
