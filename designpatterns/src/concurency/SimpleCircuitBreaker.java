@@ -40,7 +40,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * @author Viktar Charnarutski
  */
-public class SimpleCircuitBreaker implements Outage {
+public class SimpleCircuitBreaker implements CircuitBreaker, Outage {
 
     /**
      * Holds the specified threshold of failed calls.
@@ -65,7 +65,7 @@ public class SimpleCircuitBreaker implements Outage {
     /**
      * Hold's the current outage's information.
      */
-    private final AtomicReference<Failure> currentFailure = new AtomicReference<>(new Failure());
+    private final AtomicReference<Failure> currentOutageStatus = new AtomicReference<>(new Failure());
 
     /**
      * Creates a new instance on the {@code SimpleCircuitBreaker} and initialize threshold, timeout and
@@ -90,10 +90,12 @@ public class SimpleCircuitBreaker implements Outage {
      *
      * @return {@code true} if the <em>outage</em> is <em>in progress</em> state, {@code false} if not.
      */
+    @Override
     public boolean isOutageInProgress() {
         // check if the outage is in progress but could be closed
         // due to it's allowed longevity is expired
         if (isCircuitBreakerOpen() && isOpenStateTimeoutExpired()) {
+            closeCircuitBreaker();
             closeOutage();
         }
         return isCircuitBreakerOpen();
@@ -105,21 +107,22 @@ public class SimpleCircuitBreaker implements Outage {
      * <p>
      * If the current monitored time frame is expired, the failure information will be reset.
      */
+    @Override
     public void requestOutage() {
         // check if the previous failure attempts were captured long time ago
         // and not actual any more
+        Failure failure = currentOutageStatus.get();
         if (isMonitoredTimeFrameExpired()) {
-            Failure currentFailure = this.currentFailure.get();
             Failure newFailure = new Failure(1, System.currentTimeMillis(), 0L);
-            this.currentFailure.compareAndSet(currentFailure, newFailure);
+            this.currentOutageStatus.compareAndSet(failure, newFailure);
         } else {
             // increment failure attempts and then check
             // if it's already reached to a critical value
-            Failure currentFailure = this.currentFailure.get();
-            Failure newFailure = this.currentFailure.get().increment();
-            this.currentFailure.compareAndSet(currentFailure, newFailure);
+            Failure newFailure = currentOutageStatus.get().increment();
+            currentOutageStatus.compareAndSet(failure, newFailure);
             if (isThresholdReached()) {
                 openOutage();
+                openCircuitBreaker();
             }
         }
     }
@@ -130,14 +133,12 @@ public class SimpleCircuitBreaker implements Outage {
      * <p>
      * The operation is allowed only if the current state is <em>closed</em>, otherwise the call is ignored.
      */
+    @Override
     public void openOutage() {
-        if (isCircuitBreakerClosed()) {
-            state.compareAndSet(State.CLOSED, State.OPEN);
-            Failure currentFailure = this.currentFailure.get();
-            Failure newFailure = new Failure(currentFailure.failureAttempts(), currentFailure.monitoringStartTime(),
-                    System.currentTimeMillis());
-            this.currentFailure.compareAndSet(currentFailure, newFailure);
-        }
+        Failure failure = currentOutageStatus.get();
+        Failure newFailure = new Failure(failure.failureAttempts(), failure.monitoringStartTime(),
+                System.currentTimeMillis());
+        currentOutageStatus.compareAndSet(failure, newFailure);
     }
 
     /**
@@ -146,13 +147,27 @@ public class SimpleCircuitBreaker implements Outage {
      * <p>
      * The operation is allowed only if the current state is <em>open</em>, otherwise the call is ignored.
      */
+    @Override
     public void closeOutage() {
-        if (isCircuitBreakerOpen()) {
-            state.compareAndSet(State.OPEN, State.CLOSED);
-            Failure currentFailure = this.currentFailure.get();
-            Failure newFailure = new Failure();
-            this.currentFailure.compareAndSet(currentFailure, newFailure);
-        }
+        Failure failure = currentOutageStatus.get();
+        Failure newFailure = new Failure();
+        currentOutageStatus.compareAndSet(failure, newFailure);
+    }
+
+    /**
+     * Opens Circuit Breaker.
+     */
+    @Override
+    public void openCircuitBreaker() {
+        state.compareAndSet(State.CLOSED, State.OPEN);
+    }
+
+    /**
+     * Closes Circuit Breaker.
+     */
+    @Override
+    public void closeCircuitBreaker() {
+        state.compareAndSet(State.OPEN, State.CLOSED);
     }
 
     /**
@@ -163,7 +178,8 @@ public class SimpleCircuitBreaker implements Outage {
      *
      * @return {@code true} if the <em>circuit breaker</em> is in <em>open</em> state, {@code false} if not.
      */
-    private boolean isCircuitBreakerOpen() {
+    @Override
+    public boolean isCircuitBreakerOpen() {
         return state.get() == State.OPEN;
     }
 
@@ -172,7 +188,8 @@ public class SimpleCircuitBreaker implements Outage {
      *
      * @return {@code true} if the <em>circuit breaker</em> is in <em>closed</em> state, {@code false} if not.
      */
-    private boolean isCircuitBreakerClosed() {
+    @Override
+    public boolean isCircuitBreakerClosed() {
         return state.get() == State.CLOSED;
     }
 
@@ -182,7 +199,7 @@ public class SimpleCircuitBreaker implements Outage {
      * @return {@code true} if the current failure attempts number reached the defined threshold, {@code false} if not.
      */
     private boolean isThresholdReached() {
-        return currentFailure.get().failureAttempts() >= failureAttemptsThreshold;
+        return currentOutageStatus.get().failureAttempts() >= failureAttemptsThreshold;
     }
 
     /**
@@ -191,7 +208,7 @@ public class SimpleCircuitBreaker implements Outage {
      * @return {@code true} if the current outage's timeout is expired, {@code false} if not.
      */
     private boolean isOpenStateTimeoutExpired() {
-        return System.currentTimeMillis() - currentFailure.get().outageStartTime() > outageTimeout;
+        return System.currentTimeMillis() - currentOutageStatus.get().outageStartTime() > outageTimeout;
     }
 
     /**
@@ -200,7 +217,7 @@ public class SimpleCircuitBreaker implements Outage {
      * @return {@code true} if the current monitored time frame is expired, {@code false} if not.
      */
     private boolean isMonitoredTimeFrameExpired() {
-        return System.currentTimeMillis() - currentFailure.get().monitoringStartTime() > monitoredTimeFrame;
+        return System.currentTimeMillis() - currentOutageStatus.get().monitoringStartTime() > monitoredTimeFrame;
     }
 
     /**
